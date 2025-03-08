@@ -16,19 +16,50 @@ class Block:
     GRASS = 1
     DIRT = 2
     STONE = 3
+    SAND = 4
+    WATER = 5
+    SNOW = 6
+    BEDROCK = 7
+    WOOD = 8
+    LEAVES = 9
     
     # Block colors (R, G, B)
     COLORS = {
         AIR: (0, 0, 0),  # Transparent
-        GRASS: (0.2, 0.8, 0.2),  # Green
+        GRASS: (0.2, 0.8, 0.2),  # Green (base color, will be varied)
         DIRT: (0.6, 0.3, 0.0),  # Brown
         STONE: (0.5, 0.5, 0.5),  # Gray
+        SAND: (0.9, 0.8, 0.6),  # Sandy
+        WATER: (0.0, 0.3, 0.8),  # Blue
+        SNOW: (0.9, 0.9, 0.95),  # White
+        BEDROCK: (0.2, 0.2, 0.2),  # Dark gray
+        WOOD: (0.6, 0.4, 0.2),  # Brown wood
+        LEAVES: (0.1, 0.5, 0.1),  # Dark green
     }
     
+    # Noise for grass color variation
     @staticmethod
     def get_color(block_type):
-        """Get the color for a block type."""
-        return Block.COLORS.get(block_type, (1, 0, 1))  # Default to magenta for unknown types
+        """Get the color for a block type with variations for natural blocks."""
+        if block_type not in Block.COLORS:
+            return (1, 0, 1)  # Default to magenta for unknown types
+            
+        base_color = Block.COLORS[block_type]
+        
+        # Add variation to grass color
+        if block_type == Block.GRASS:
+            # Add some random variation to make grass look more natural
+            import random
+            r, g, b = base_color
+            # Vary the green component to create different shades
+            g_variation = random.uniform(-0.1, 0.1)
+            # Vary the red component slightly for yellowish/brownish tints
+            r_variation = random.uniform(-0.05, 0.05)
+            return (max(0, min(1, r + r_variation)), 
+                    max(0, min(1, g + g_variation)), 
+                    b)
+        
+        return base_color
 
 
 class Chunk:
@@ -233,6 +264,9 @@ class World:
         lacunarity = 2.0
         seed = 42  # Fixed seed for reproducibility
         
+        # List to store positions for tree generation
+        tree_positions = []
+        
         # Generate heightmap
         for chunk_x in range(-self.world_size // 2, self.world_size // 2):
             for chunk_z in range(-self.world_size // 2, self.world_size // 2):
@@ -268,15 +302,69 @@ class World:
                                 # Calculate world y coordinate
                                 world_y = chunk_y * self.chunk_size + y
                                 
-                                # Determine block type based on height
-                                if world_y < height - 4:
+                                # Calculate biome value using a different noise pattern
+                                biome_nx = world_x / (scale * 2)
+                                biome_nz = world_z / (scale * 2)
+                                biome_value = noise.pnoise2(biome_nx, biome_nz, octaves=2,
+                                                          persistence=0.5,
+                                                          lacunarity=2.0,
+                                                          base=seed+100)
+                                
+                                # Temperature decreases with height and varies with biome
+                                temperature = 1.0 - (world_y / 40.0) + biome_value * 0.5
+                                
+                                # Moisture varies with biome
+                                moisture = (biome_value + 1) / 2.0
+                                
+                                # Determine block type based on height, temperature, and moisture
+                                if world_y == 0:
+                                    # Bedrock at the very bottom
+                                    block_type = Block.BEDROCK
+                                elif world_y < 5:
+                                    # Mostly bedrock with some stone near the bottom
+                                    block_type = Block.BEDROCK if np.random.random() < 0.7 else Block.STONE
+                                elif world_y < height - 4:
+                                    # Deep underground is stone
                                     block_type = Block.STONE
                                 elif world_y < height - 1:
-                                    block_type = Block.DIRT
+                                    # Near surface layer
+                                    if temperature < 0.2:
+                                        # Cold biomes have stone closer to the surface
+                                        block_type = Block.STONE
+                                    else:
+                                        block_type = Block.DIRT
                                 elif world_y < height:
-                                    block_type = Block.GRASS
+                                    # Surface layer
+                                    if temperature < 0.2:
+                                        # Snow in very cold areas
+                                        block_type = Block.SNOW
+                                    elif temperature < 0.4 and moisture > 0.6:
+                                        # Stone in cold, wet areas (mountains)
+                                        block_type = Block.STONE
+                                    elif moisture < 0.3:
+                                        # Sand in dry areas
+                                        block_type = Block.SAND
+                                    else:
+                                        # Grass in moderate areas
+                                        block_type = Block.GRASS
+                                elif world_y == height and world_y < 10:
+                                    # Water in low areas
+                                    block_type = Block.WATER
                                 else:
                                     block_type = Block.AIR
+                                    
+                                # Occasionally add trees in grassy areas (but not too many)
+                                if block_type == Block.GRASS and np.random.random() < 0.005 and world_y > 10:
+                                    # Make sure there's enough space above for a tree
+                                    has_space = True
+                                    for check_y in range(1, 8):  # Check 8 blocks above
+                                        if self.get_block(world_x, world_y + check_y, world_z) != Block.AIR:
+                                            has_space = False
+                                            break
+                                    
+                                    if has_space:
+                                        # Mark this position for tree generation
+                                        tree_positions.append((world_x, world_y, world_z))
                                 
                                 # Set the block
                                 chunk.set_block(x, y, z, block_type)
@@ -329,6 +417,37 @@ class World:
         """Update the world state."""
         # Currently, the world is static, so no updates are needed
         pass
+    
+    def _generate_trees(self, tree_positions):
+        """Generate trees at the specified positions."""
+        for wx, wy, wz in tree_positions:
+            # Double-check that we have space for the tree
+            has_space = True
+            for check_y in range(1, 8):
+                if self.get_block(wx, wy + check_y, wz) != Block.AIR:
+                    has_space = False
+                    break
+                    
+            if not has_space:
+                continue
+                
+            # Tree trunk (3-5 blocks high)
+            trunk_height = np.random.randint(3, 6)
+            for y_offset in range(1, trunk_height + 1):
+                self.set_block(wx, wy + y_offset, wz, Block.WOOD)
+            
+            # Tree leaves (a 3x3x3 cube on top of the trunk)
+            leaf_y = wy + trunk_height
+            for y_offset in range(0, 3):
+                for x_offset in range(-1, 2):
+                    for z_offset in range(-1, 2):
+                        # Skip corners for a more rounded shape
+                        if abs(x_offset) == 1 and abs(z_offset) == 1 and y_offset != 1:
+                            continue
+                        # Make sure we don't replace existing trunks
+                        if x_offset == 0 and z_offset == 0 and y_offset == 0:
+                            continue
+                        self.set_block(wx + x_offset, leaf_y + y_offset, wz + z_offset, Block.LEAVES)
     
     def render(self):
         """Render all chunks in the world."""
