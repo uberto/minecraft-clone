@@ -38,8 +38,10 @@ class Game:
         self._setup_opengl()
         
         # Create game components
-        self.camera = Camera(position=[0, 10, 10])
         self.world = World()
+        
+        # Initialize camera with a better starting position to see the terrain
+        self.camera = Camera(position=[0, self.world.camera_start_height, 10])
         
         # Game state
         self.wireframe_mode = False

@@ -64,6 +64,23 @@ class Chunk:
         
         # If the adjacent position is outside the chunk, consider it visible
         if not (0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size):
+            # For top faces (dy=1), always make them visible to fix the terrain issue
+            if dy == 1:
+                return True
+            # For other faces at chunk boundaries, check with the world
+            wx = x + self.position[0] * self.size
+            wy = y + self.position[1] * self.size
+            wz = z + self.position[2] * self.size
+            
+            # Calculate world coordinates of the adjacent block
+            world_nx = wx + dx
+            world_ny = wy + dy
+            world_nz = wz + dz
+            
+            # Ask the parent world if this block exists and is air
+            # This will be set by the World class when it adds the chunk
+            if hasattr(self, 'world'):
+                return self.world.get_block(world_nx, world_ny, world_nz) == Block.AIR
             return True
         
         # If the adjacent block is air, the face is visible
@@ -180,6 +197,9 @@ class World:
         # Dictionary to store chunks, keyed by position (x, y, z)
         self.chunks = {}
         
+        # Set camera starting position higher to see the terrain better
+        self.camera_start_height = 30
+        
         # Generate the initial world
         self._generate_world()
     
@@ -190,6 +210,8 @@ class World:
             for z in range(-self.world_size // 2, self.world_size // 2):
                 for y in range(self.height):
                     chunk = Chunk(position=(x, y, z), size=self.chunk_size)
+                    # Set a reference to the world for chunk boundary checks
+                    chunk.world = self
                     self.chunks[(x, y, z)] = chunk
         
         # Generate terrain
@@ -226,6 +248,8 @@ class World:
                         
                         # Scale height to chunk coordinates
                         height = int((height_value + 1) * 10) + 16  # Range 6-26
+                        # Ensure height is at least 1 to avoid completely flat terrain
+                        height = max(height, 1)
                         
                         # Fill in blocks
                         for chunk_y in range(self.height):
