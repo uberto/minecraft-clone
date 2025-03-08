@@ -64,9 +64,10 @@ class Chunk:
         
         # If the adjacent position is outside the chunk, consider it visible
         if not (0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size):
-            # For top faces (dy=1), always make them visible to fix the terrain issue
-            if dy == 1:
+            # For top faces (dy=1) and side faces at chunk boundaries, make them visible
+            if dy == 1 or dx != 0 or dz != 0:
                 return True
+                
             # For other faces at chunk boundaries, check with the world
             wx = x + self.position[0] * self.size
             wy = y + self.position[1] * self.size
@@ -93,6 +94,9 @@ class Chunk:
         
         self.display_list = glGenLists(1)
         glNewList(self.display_list, GL_COMPILE)
+        
+        # Disable culling temporarily to ensure all faces are rendered
+        glDisable(GL_CULL_FACE)
         
         # Iterate through all blocks in the chunk
         for x in range(self.size):
@@ -173,6 +177,9 @@ class Chunk:
                         glVertex3f(wx, wy, wz + 1)
                         glEnd()
         
+        # Re-enable culling after rendering
+        glEnable(GL_CULL_FACE)
+        
         glEndList()
         self.needs_update = False
     
@@ -224,7 +231,7 @@ class World:
         octaves = 6
         persistence = 0.5
         lacunarity = 2.0
-        seed = np.random.randint(0, 1000)
+        seed = 42  # Fixed seed for reproducibility
         
         # Generate heightmap
         for chunk_x in range(-self.world_size // 2, self.world_size // 2):
